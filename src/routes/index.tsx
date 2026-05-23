@@ -80,24 +80,24 @@ function Arena() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-6 grid grid-cols-12 gap-6">
-        {/* Agent grid */}
-        <section className="col-span-12 lg:col-span-4 space-y-2">
-          <h2 className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Agents</h2>
-          {AGENTS.map((a, i) => {
-            const done = result && i < result.turns.length;
-            const active = mutation.isPending && i === (result?.turns.length ?? 0);
-            return (
-              <Card key={a.name} className={`p-3 flex items-center gap-3 transition ${active ? "border-primary" : ""} ${done ? "bg-card" : "opacity-60"}`}>
-                <div className={`size-2 rounded-full ${done ? "bg-primary" : active ? "bg-primary animate-pulse" : "bg-muted"}`} />
-                <div className="flex-1">
-                  <div className="text-sm font-medium">{a.name}</div>
-                  <div className="text-xs text-muted-foreground">{a.role}</div>
-                </div>
-                <div className="text-xs text-muted-foreground">#{i + 1}</div>
-              </Card>
-            );
-          })}
+        {/* Mech bay grid */}
+        <section className="col-span-12 lg:col-span-4">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-mono">Station · Mech Bay</h2>
+            <span className="text-[10px] font-mono text-muted-foreground">
+              {result ? `${result.turns.length}/9 ONLINE` : mutation.isPending ? "DEPLOYING…" : "STANDBY"}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-2">
+            {AGENTS.map((a, i) => {
+              const done = !!result && i < result.turns.length;
+              const active = mutation.isPending && i === (result?.turns.length ?? 0);
+              const status = done ? "done" : active ? "active" : "idle";
+              return <PixelMech key={a.name} index={i} status={status} name={a.name} role={a.role} />;
+            })}
+          </div>
         </section>
+
 
         {/* Output */}
         <section className="col-span-12 lg:col-span-8 space-y-4">
