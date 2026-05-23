@@ -21,17 +21,35 @@ async function callAI(system: string, user: string, jsonSchema?: any): Promise<a
     body.tool_choice = { type: "function", function: { name: "respond" } };
   }
 
-  const r = await fetch(GATEWAY, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!r.ok) {
-    const t = await r.text();
+  let r: Response | undefined;
+  let lastErr = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      r = await fetch(GATEWAY, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch (e: any) {
+      lastErr = e?.message ?? String(e);
+      await new Promise((res) => setTimeout(res, 500 * (attempt + 1)));
+      continue;
+    }
+    if (r.ok) break;
     if (r.status === 429) throw new Error("Rate limit exceeded. Try again shortly.");
     if (r.status === 402) throw new Error("AI credits exhausted. Add funds in Settings → Workspace → Usage.");
+    if (r.status >= 500 && r.status < 600) {
+      lastErr = `AI gateway ${r.status}`;
+      await new Promise((res) => setTimeout(res, 800 * (attempt + 1)));
+      continue;
+    }
+    const t = await r.text();
     throw new Error(`AI gateway ${r.status}: ${t.slice(0, 200)}`);
+  }
+
+  if (!r || !r.ok) {
+    if (jsonSchema) return { recommendations: [], _degraded: true, _reason: lastErr };
+    return `[AI temporarily unavailable: ${lastErr}]`;
   }
 
   const data = await r.json();
