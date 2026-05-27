@@ -1,4 +1,15 @@
-// Server-only data source fetchers. Free-tier APIs.
+// Server-only data source fetchers. Free-tier APIs. In-memory TTL cache.
+
+type CacheEntry<T> = { value: T; expires: number };
+const cache = new Map<string, CacheEntry<unknown>>();
+async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
+  const hit = cache.get(key) as CacheEntry<T> | undefined;
+  if (hit && hit.expires > Date.now()) return hit.value;
+  const value = await fn();
+  cache.set(key, { value, expires: Date.now() + ttlMs });
+  return value;
+}
+
 
 const FINNHUB = "https://finnhub.io/api/v1";
 const GDELT = "https://api.gdeltproject.org/api/v2/doc/doc";
@@ -122,10 +133,11 @@ export async function fetchPolitical(): Promise<PoliticalEvent[]> {
 
 export async function fetchAllSources() {
   const [options, news, bills, political] = await Promise.all([
-    fetchOptionsFlow(),
-    fetchNews(),
-    fetchLegislation(),
-    fetchPolitical(),
+    cached("options", 15_000, fetchOptionsFlow),
+    cached("news", 120_000, fetchNews),
+    cached("bills", 3_600_000, fetchLegislation),
+    cached("political", 300_000, fetchPolitical),
   ]);
   return { options, news, bills, political, fetchedAt: new Date().toISOString() };
 }
+
