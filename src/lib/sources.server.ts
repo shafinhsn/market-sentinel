@@ -133,10 +133,11 @@ export async function fetchPolitical(): Promise<PoliticalEvent[]> {
 
 export async function fetchAllSources() {
   const [options, news, bills, political] = await Promise.all([
-    fetchOptionsFlow(),
-    fetchNews(),
-    fetchLegislation(),
-    fetchPolitical(),
+    cached("options", 15_000, fetchOptionsFlow),
+    cached("news", 120_000, fetchNews),
+    cached("bills", 3_600_000, fetchLegislation),
+    cached("political", 300_000, fetchPolitical),
   ]);
   return { options, news, bills, political, fetchedAt: new Date().toISOString() };
 }
+
