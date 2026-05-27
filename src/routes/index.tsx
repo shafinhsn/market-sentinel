@@ -1,8 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
-import { useMutation } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
-import { runPipeline, type PipelineResult } from "@/lib/pipeline.functions";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PixelMech } from "@/components/PixelMech";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -15,7 +12,7 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "Market Intel Arena — 9-Agent Pipeline" },
-      { name: "description", content: "Real-time options + legislation + political intelligence powered by a 9-agent AI pipeline." },
+      { name: "description", content: "Real-time options + legislation + political intelligence powered by a streaming 9-agent AI pipeline." },
     ],
   }),
   component: Arena,
@@ -33,27 +30,101 @@ const AGENTS = [
   { name: "Kai Nakamura", role: "Freshness Gate" },
 ];
 
+type Status = "idle" | "active" | "done";
+type Turn = { agent: string; role: string; output: string; idx: number };
+type Rec = {
+  symbol: string;
+  direction: "bullish" | "bearish" | "neutral";
+  confidence: number;
+  thesis: string;
+  entry?: string;
+  target?: string;
+  stop?: string;
+  risk: string;
+};
+
 function Arena() {
-  const run = useServerFn(runPipeline);
   const [loop, setLoop] = useState(false);
-  const [result, setResult] = useState<PipelineResult | null>(null);
+  const [running, setRunning] = useState(false);
+  const [statuses, setStatuses] = useState<Status[]>(() => Array(9).fill("idle"));
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [sources, setSources] = useState<any | null>(null);
+  const [recs, setRecs] = useState<Rec[]>([]);
+  const [freshness, setFreshness] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [fetchedAt, setFetchedAt] = useState<string | null>(null);
 
-  const mutation = useMutation({
-    mutationFn: () => run(),
-    onSuccess: (r) => { setResult(r); setError(null); },
-    onError: (e: Error) => setError(e.message),
-  });
+  const abortRef = useRef<AbortController | null>(null);
 
-  const loopRef = useRef(loop);
-  loopRef.current = loop;
+  const run = useCallback(async () => {
+    if (running) return;
+    setRunning(true);
+    setError(null);
+    setStatuses(Array(9).fill("idle"));
+    setTurns([]);
+    setRecs([]);
+    setFreshness("");
+
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
+    try {
+      const res = await fetch("/api/pipeline", { signal: ctrl.signal });
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const events = buf.split("\n\n");
+        buf = events.pop() ?? "";
+        for (const block of events) {
+          const lines = block.split("\n");
+          const evLine = lines.find((l) => l.startsWith("event: "));
+          const dataLine = lines.find((l) => l.startsWith("data: "));
+          if (!evLine || !dataLine) continue;
+          const ev = evLine.slice(7).trim();
+          const data = JSON.parse(dataLine.slice(6));
+          switch (ev) {
+            case "sources": setSources(data); break;
+            case "stage":
+              if (typeof data.step === "number") {
+                setStatuses((s) => {
+                  const n = [...s];
+                  n[data.step] = data.status;
+                  return n;
+                });
+              }
+              break;
+            case "turn": setTurns((t) => [...t, data]); break;
+            case "recommendations": setRecs(data); break;
+            case "freshness": setFreshness(data); break;
+            case "done": setFetchedAt(data.fetchedAt); break;
+            case "error": setError(data.message); break;
+          }
+        }
+      }
+    } catch (e: any) {
+      if (e?.name !== "AbortError") setError(e?.message ?? String(e));
+    } finally {
+      setRunning(false);
+      abortRef.current = null;
+    }
+  }, [running]);
+
   useEffect(() => {
     if (!loop) return;
-    const id = setInterval(() => { if (!mutation.isPending) mutation.mutate(); }, 30000);
+    const id = setInterval(() => { if (!abortRef.current) run(); }, 30000);
     return () => clearInterval(id);
-  }, [loop, mutation]);
+  }, [loop, run]);
 
-  const completedAgents = result ? result.turns.length : (mutation.isPending ? -1 : 0);
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  const doneCount = statuses.filter((s) => s === "done").length;
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -64,42 +135,41 @@ function Arena() {
               <Activity className="size-5 text-primary" />
               Market Intel Arena
             </h1>
-            <p className="text-xs text-muted-foreground">9-Agent Pipeline · Finnhub · NewsAPI · Congress.gov · GDELT</p>
+            <p className="text-xs text-muted-foreground">Streaming 9-Agent Pipeline · Parallel stages · AI SDK</p>
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 text-sm">
               <Switch checked={loop} onCheckedChange={setLoop} id="loop" />
               <label htmlFor="loop" className="text-muted-foreground">Auto-loop (30s)</label>
             </div>
-            <Button onClick={() => mutation.mutate()} disabled={mutation.isPending} size="lg">
-              {mutation.isPending ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Zap className="size-4 mr-2" />}
-              {mutation.isPending ? "Agents working…" : "Deploy 9-Agent Pipeline"}
+            <Button onClick={run} disabled={running} size="lg">
+              {running ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Zap className="size-4 mr-2" />}
+              {running ? "Streaming…" : "Deploy 9-Agent Pipeline"}
             </Button>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-6 grid grid-cols-12 gap-6">
-        {/* Mech bay grid */}
         <section className="col-span-12 lg:col-span-4">
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-mono">Station · Mech Bay</h2>
             <span className="text-[10px] font-mono text-muted-foreground">
-              {result ? `${result.turns.length}/9 ONLINE` : mutation.isPending ? "DEPLOYING…" : "STANDBY"}
+              {running ? `${doneCount}/9 ONLINE` : doneCount > 0 ? `${doneCount}/9 COMPLETE` : "STANDBY"}
             </span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-2">
-            {AGENTS.map((a, i) => {
-              const done = !!result && i < result.turns.length;
-              const active = mutation.isPending && i === (result?.turns.length ?? 0);
-              const status = done ? "done" : active ? "active" : "idle";
-              return <PixelMech key={a.name} index={i} status={status} name={a.name} role={a.role} />;
-            })}
+            {AGENTS.map((a, i) => (
+              <PixelMech key={a.name} index={i} status={statuses[i]} name={a.name} role={a.role} />
+            ))}
           </div>
+          {fetchedAt && (
+            <p className="text-[10px] font-mono text-muted-foreground mt-3">
+              Sources fetched {new Date(fetchedAt).toLocaleTimeString()}
+            </p>
+          )}
         </section>
 
-
-        {/* Output */}
         <section className="col-span-12 lg:col-span-8 space-y-4">
           {error && (
             <Card className="p-4 border-destructive">
@@ -108,34 +178,27 @@ function Arena() {
             </Card>
           )}
 
-          {!result && !mutation.isPending && (
+          {!running && turns.length === 0 && !error && (
             <Card className="p-12 text-center">
               <Activity className="size-12 mx-auto text-muted-foreground mb-3" />
               <p className="text-lg font-medium">Arena idle</p>
-              <p className="text-sm text-muted-foreground mt-1">Click Deploy to run the 9-agent pipeline against live market data.</p>
+              <p className="text-sm text-muted-foreground mt-1">Click Deploy to stream the 9-agent pipeline against live market data.</p>
             </Card>
           )}
 
-          {mutation.isPending && !result && (
-            <Card className="p-8 text-center">
-              <Loader2 className="size-8 mx-auto animate-spin text-primary mb-3" />
-              <p className="text-sm text-muted-foreground">Fetching options, news, legislation, political signals…</p>
-            </Card>
-          )}
-
-          {result && (
+          {(turns.length > 0 || sources) && (
             <Tabs defaultValue="recs">
               <TabsList>
-                <TabsTrigger value="recs">Recommendations</TabsTrigger>
-                <TabsTrigger value="debate">Debate Log</TabsTrigger>
+                <TabsTrigger value="recs">Recommendations ({recs.length})</TabsTrigger>
+                <TabsTrigger value="debate">Debate Log ({turns.length})</TabsTrigger>
                 <TabsTrigger value="sources">Live Sources</TabsTrigger>
               </TabsList>
 
               <TabsContent value="recs" className="space-y-3 mt-4">
-                {result.recommendations.length === 0 && (
+                {recs.length === 0 && !running && (
                   <Card className="p-6 text-sm text-muted-foreground">No high-conviction trades this cycle.</Card>
                 )}
-                {result.recommendations.map((r, i) => (
+                {recs.map((r, i) => (
                   <Card key={i} className="p-4">
                     <div className="flex items-center gap-3 mb-2">
                       <span className="text-lg font-bold">{r.symbol}</span>
@@ -154,16 +217,18 @@ function Arena() {
                     <p className="text-xs text-muted-foreground mt-2 italic">Risk: {r.risk}</p>
                   </Card>
                 ))}
-                <Card className="p-3 text-xs text-muted-foreground">
-                  <strong className="text-foreground">Freshness gate:</strong> {result.freshnessCheck}
-                </Card>
+                {freshness && (
+                  <Card className="p-3 text-xs text-muted-foreground">
+                    <strong className="text-foreground">Freshness gate:</strong> {freshness}
+                  </Card>
+                )}
               </TabsContent>
 
               <TabsContent value="debate" className="space-y-3 mt-4">
-                {result.turns.map((t, i) => (
-                  <Card key={i} className="p-4">
+                {turns.sort((a, b) => a.idx - b.idx).map((t) => (
+                  <Card key={t.idx} className="p-4">
                     <div className="flex items-center gap-2 mb-2">
-                      <Badge variant="outline">#{i + 1}</Badge>
+                      <Badge variant="outline">#{t.idx + 1}</Badge>
                       <span className="font-medium text-sm">{t.agent}</span>
                       <span className="text-xs text-muted-foreground">· {t.role}</span>
                     </div>
@@ -173,48 +238,50 @@ function Arena() {
               </TabsContent>
 
               <TabsContent value="sources" className="mt-4">
-                <Tabs defaultValue="options">
-                  <TabsList>
-                    <TabsTrigger value="options">Options ({result.sources.options.length})</TabsTrigger>
-                    <TabsTrigger value="news">News ({result.sources.news.length})</TabsTrigger>
-                    <TabsTrigger value="bills">Bills ({result.sources.bills.length})</TabsTrigger>
-                    <TabsTrigger value="pol">Political ({result.sources.political.length})</TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="options" className="mt-3 space-y-1">
-                    {result.sources.options.map((o: any) => (
-                      <div key={o.symbol} className="flex items-center justify-between p-2 text-sm border-b border-border">
-                        <span className="font-mono font-medium">{o.symbol}</span>
-                        <span className="font-mono">${o.price?.toFixed(2)}</span>
-                        <span className={`font-mono ${o.changePct > 0 ? "text-primary" : "text-destructive"}`}>{o.changePct?.toFixed(2)}%</span>
-                        {o.unusual && <Badge variant="destructive" className="text-xs">unusual</Badge>}
-                      </div>
-                    ))}
-                  </TabsContent>
-                  <TabsContent value="news" className="mt-3 space-y-2">
-                    {result.sources.news.map((n: any, i: number) => (
-                      <a key={i} href={n.url} target="_blank" rel="noreferrer" className="block p-2 text-sm border-b border-border hover:bg-accent">
-                        <div className="font-medium">{n.title}</div>
-                        <div className="text-xs text-muted-foreground">{n.source} · {new Date(n.publishedAt).toLocaleString()}</div>
-                      </a>
-                    ))}
-                  </TabsContent>
-                  <TabsContent value="bills" className="mt-3 space-y-2">
-                    {result.sources.bills.map((b: any, i: number) => (
-                      <div key={i} className="p-2 text-sm border-b border-border">
-                        <div className="font-medium">{b.type} {b.number} · {b.title}</div>
-                        {b.latestAction && <div className="text-xs text-muted-foreground mt-1">{b.latestAction}</div>}
-                      </div>
-                    ))}
-                  </TabsContent>
-                  <TabsContent value="pol" className="mt-3 space-y-2">
-                    {result.sources.political.map((p: any, i: number) => (
-                      <a key={i} href={p.url} target="_blank" rel="noreferrer" className="block p-2 text-sm border-b border-border hover:bg-accent">
-                        <div className="font-medium">{p.title}</div>
-                        <div className="text-xs text-muted-foreground">{p.source}</div>
-                      </a>
-                    ))}
-                  </TabsContent>
-                </Tabs>
+                {sources && (
+                  <Tabs defaultValue="options">
+                    <TabsList>
+                      <TabsTrigger value="options">Options ({sources.options.length})</TabsTrigger>
+                      <TabsTrigger value="news">News ({sources.news.length})</TabsTrigger>
+                      <TabsTrigger value="bills">Bills ({sources.bills.length})</TabsTrigger>
+                      <TabsTrigger value="pol">Political ({sources.political.length})</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="options" className="mt-3 space-y-1">
+                      {sources.options.map((o: any) => (
+                        <div key={o.symbol} className="flex items-center justify-between p-2 text-sm border-b border-border">
+                          <span className="font-mono font-medium">{o.symbol}</span>
+                          <span className="font-mono">${o.price?.toFixed(2)}</span>
+                          <span className={`font-mono ${o.changePct > 0 ? "text-primary" : "text-destructive"}`}>{o.changePct?.toFixed(2)}%</span>
+                          {o.unusual && <Badge variant="destructive" className="text-xs">unusual</Badge>}
+                        </div>
+                      ))}
+                    </TabsContent>
+                    <TabsContent value="news" className="mt-3 space-y-2">
+                      {sources.news.map((n: any, i: number) => (
+                        <a key={i} href={n.url} target="_blank" rel="noreferrer" className="block p-2 text-sm border-b border-border hover:bg-accent">
+                          <div className="font-medium">{n.title}</div>
+                          <div className="text-xs text-muted-foreground">{n.source} · {new Date(n.publishedAt).toLocaleString()}</div>
+                        </a>
+                      ))}
+                    </TabsContent>
+                    <TabsContent value="bills" className="mt-3 space-y-2">
+                      {sources.bills.map((b: any, i: number) => (
+                        <div key={i} className="p-2 text-sm border-b border-border">
+                          <div className="font-medium">{b.type} {b.number} · {b.title}</div>
+                          {b.latestAction && <div className="text-xs text-muted-foreground mt-1">{b.latestAction}</div>}
+                        </div>
+                      ))}
+                    </TabsContent>
+                    <TabsContent value="pol" className="mt-3 space-y-2">
+                      {sources.political.map((p: any, i: number) => (
+                        <a key={i} href={p.url} target="_blank" rel="noreferrer" className="block p-2 text-sm border-b border-border hover:bg-accent">
+                          <div className="font-medium">{p.title}</div>
+                          <div className="text-xs text-muted-foreground">{p.source}</div>
+                        </a>
+                      ))}
+                    </TabsContent>
+                  </Tabs>
+                )}
               </TabsContent>
             </Tabs>
           )}
