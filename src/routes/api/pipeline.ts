@@ -151,7 +151,24 @@ export const Route = createFileRoute("/api/pipeline")({
               send("freshness", tKai);
               send("stage", { step: 8, status: "done" });
 
+              // Persist the run (best-effort, never blocks the stream)
+              try {
+                const { error: insErr } = await supabaseAdmin.from("pipeline_runs").insert({
+                  watchlist: effectiveWatchlist,
+                  hot_tickers: sources.hotTickers ?? [],
+                  recommendations: recs.recommendations,
+                  freshness: tKai,
+                  turns: allTurns,
+                  sources,
+                  fetched_at: sources.fetchedAt,
+                });
+                if (insErr) send("warn", { msg: `Persist failed: ${insErr.message}` });
+              } catch (e: any) {
+                send("warn", { msg: `Persist threw: ${e?.message ?? e}` });
+              }
+
               send("done", { fetchedAt: sources.fetchedAt });
+
             } catch (e: any) {
               send("error", { message: e?.message ?? String(e) });
             } finally {
