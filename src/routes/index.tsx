@@ -58,6 +58,41 @@ function Arena() {
   const [freshness, setFreshness] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
+  const [watchlist, setWatchlist] = useState<string[]>(() => {
+    if (typeof window === "undefined") return DEFAULT_WATCHLIST;
+    try {
+      const raw = localStorage.getItem(WL_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_WATCHLIST;
+    } catch { return DEFAULT_WATCHLIST; }
+  });
+  const [tickerInput, setTickerInput] = useState("");
+
+  useEffect(() => {
+    try { localStorage.setItem(WL_KEY, JSON.stringify(watchlist)); } catch {}
+  }, [watchlist]);
+
+  const addTicker = () => {
+    const t = tickerInput.trim().toUpperCase();
+    if (!t || watchlist.includes(t)) { setTickerInput(""); return; }
+    setWatchlist((w) => [...w, t]);
+    setTickerInput("");
+  };
+  const removeTicker = (t: string) => setWatchlist((w) => w.filter((x) => x !== t));
+
+  const abortRef = useRef<AbortController | null>(null);
+  const watchlistRef = useRef(watchlist);
+  useEffect(() => { watchlistRef.current = watchlist; }, [watchlist]);
+
+  const run = useCallback(async () => {
+    if (running) return;
+    setRunning(true);
+    setError(null);
+    setStatuses(Array(9).fill("idle"));
+    setTurns([]);
+    setRecs([]);
+    setFreshness("");
+
 
   const abortRef = useRef<AbortController | null>(null);
 
