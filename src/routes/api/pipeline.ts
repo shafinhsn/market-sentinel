@@ -37,11 +37,19 @@ const recSchema = z.object({
 export const Route = createFileRoute("/api/pipeline")({
   server: {
     handlers: {
-      GET: async () => {
+      GET: async ({ request }) => {
         const key = process.env.LOVABLE_API_KEY;
         if (!key) return new Response("Missing LOVABLE_API_KEY", { status: 500 });
         const gateway = createLovableAiGatewayProvider(key);
         const model = gateway(MODEL);
+
+        const url = new URL(request.url);
+        const wlParam = url.searchParams.get("watchlist") ?? "";
+        const watchlist = wlParam
+          .split(",")
+          .map((s) => s.trim().toUpperCase())
+          .filter(Boolean);
+        const effectiveWatchlist = watchlist.length > 0 ? watchlist : DEFAULT_WATCHLIST;
 
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
@@ -52,9 +60,10 @@ export const Route = createFileRoute("/api/pipeline")({
 
             try {
               send("stage", { step: "sources", status: "active" });
-              const sources = await fetchAllSources();
+              const sources = await fetchAllSources(effectiveWatchlist);
               send("sources", sources);
               send("stage", { step: "sources", status: "done" });
+
 
               // Stages 1-4 in PARALLEL (independent analyses)
               const parallel1 = [
