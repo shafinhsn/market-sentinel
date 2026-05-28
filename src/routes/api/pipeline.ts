@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { generateText, Output } from "ai";
 import { z } from "zod";
 import { createLovableAiGatewayProvider } from "@/lib/ai-gateway.server";
-import { fetchAllSources } from "@/lib/sources.server";
+import { fetchAllSources, DEFAULT_WATCHLIST } from "@/lib/sources.server";
 
 const MODEL = "google/gemini-3-flash-preview";
 
