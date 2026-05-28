@@ -156,12 +156,13 @@ export const Route = createFileRoute("/api/pipeline")({
                 const { error: insErr } = await supabaseAdmin.from("pipeline_runs").insert({
                   watchlist: effectiveWatchlist,
                   hot_tickers: sources.hotTickers ?? [],
-                  recommendations: recs.recommendations,
+                  recommendations: recs.recommendations as any,
                   freshness: tKai,
-                  turns: allTurns,
-                  sources,
+                  turns: allTurns as any,
+                  sources: sources as any,
                   fetched_at: sources.fetchedAt,
                 });
+
                 if (insErr) send("warn", { msg: `Persist failed: ${insErr.message}` });
               } catch (e: any) {
                 send("warn", { msg: `Persist threw: ${e?.message ?? e}` });
