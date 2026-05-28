@@ -5,8 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Activity, TrendingUp, TrendingDown, Minus, Loader2, Zap } from "lucide-react";
+import { Activity, TrendingUp, TrendingDown, Minus, Loader2, Zap, X, Plus } from "lucide-react";
+
+const DEFAULT_WATCHLIST = ["SPY", "QQQ", "NVDA", "PLTR", "TSLA", "AAPL", "MSFT", "AMD", "META", "AMZN", "RXRX", "ARWR"];
+const WL_KEY = "mia.watchlist.v1";
+
 
 export const Route = createFileRoute("/")({
   head: () => ({
