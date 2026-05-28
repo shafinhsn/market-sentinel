@@ -2,7 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { generateText, Output } from "ai";
 import { z } from "zod";
 import { createLovableAiGatewayProvider } from "@/lib/ai-gateway.server";
-import { fetchAllSources } from "@/lib/sources.server";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { fetchAllSources, DEFAULT_WATCHLIST } from "@/lib/sources.server";
+
 
 const MODEL = "google/gemini-3-flash-preview";
 
@@ -37,24 +39,36 @@ const recSchema = z.object({
 export const Route = createFileRoute("/api/pipeline")({
   server: {
     handlers: {
-      GET: async () => {
+      GET: async ({ request }) => {
         const key = process.env.LOVABLE_API_KEY;
         if (!key) return new Response("Missing LOVABLE_API_KEY", { status: 500 });
         const gateway = createLovableAiGatewayProvider(key);
         const model = gateway(MODEL);
 
+        const url = new URL(request.url);
+        const wlParam = url.searchParams.get("watchlist") ?? "";
+        const watchlist = wlParam
+          .split(",")
+          .map((s) => s.trim().toUpperCase())
+          .filter(Boolean);
+        const effectiveWatchlist = watchlist.length > 0 ? watchlist : DEFAULT_WATCHLIST;
+
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
           async start(controller) {
+            const allTurns: Array<{ agent: string; role: string; output: string; idx: number }> = [];
             const send = (event: string, data: unknown) => {
+              if (event === "turn") allTurns.push(data as any);
               controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
             };
 
+
             try {
               send("stage", { step: "sources", status: "active" });
-              const sources = await fetchAllSources();
+              const sources = await fetchAllSources(effectiveWatchlist);
               send("sources", sources);
               send("stage", { step: "sources", status: "done" });
+
 
               // Stages 1-4 in PARALLEL (independent analyses)
               const parallel1 = [
@@ -63,7 +77,8 @@ export const Route = createFileRoute("/api/pipeline")({
                   user: `Live quotes & flow data:\n${JSON.stringify(sources.options, null, 2)}\n\nWhich tickers show unusual activity and why?` },
                 { agent: "Morgan Lee", role: "News Intelligence", idx: 1,
                   sys: "You are Morgan Lee, market news analyst. Be concise. Filter for catalysts that affect equity markets.",
-                  user: `Recent headlines:\n${JSON.stringify(sources.news.slice(0, 15), null, 2)}\n\nWhich news items are real catalysts? Tag tickers/sectors.` },
+                  user: `Hot tickers from today's options flow (news was queried around these): ${sources.hotTickers.join(", ") || "none"}\n\nHeadlines:\n${JSON.stringify(sources.news.slice(0, 15), null, 2)}\n\nWhich news items are real catalysts for the hot tickers? Tag tickers/sectors.` },
+
                 { agent: "Jordan Rivera", role: "Legislation", idx: 2,
                   sys: "You are Jordan Rivera, legislative analyst. Be concise. Map bills to market sectors.",
                   user: `Active congressional bills:\n${JSON.stringify(sources.bills, null, 2)}\n\nWhich bills could move sectors? Estimate passage probability and timeline.` },
@@ -136,7 +151,25 @@ export const Route = createFileRoute("/api/pipeline")({
               send("freshness", tKai);
               send("stage", { step: 8, status: "done" });
 
+              // Persist the run (best-effort, never blocks the stream)
+              try {
+                const { error: insErr } = await supabaseAdmin.from("pipeline_runs").insert({
+                  watchlist: effectiveWatchlist,
+                  hot_tickers: sources.hotTickers ?? [],
+                  recommendations: recs.recommendations as any,
+                  freshness: tKai,
+                  turns: allTurns as any,
+                  sources: sources as any,
+                  fetched_at: sources.fetchedAt,
+                });
+
+                if (insErr) send("warn", { msg: `Persist failed: ${insErr.message}` });
+              } catch (e: any) {
+                send("warn", { msg: `Persist threw: ${e?.message ?? e}` });
+              }
+
               send("done", { fetchedAt: sources.fetchedAt });
+
             } catch (e: any) {
               send("error", { message: e?.message ?? String(e) });
             } finally {

@@ -5,8 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Activity, TrendingUp, TrendingDown, Minus, Loader2, Zap } from "lucide-react";
+import { Activity, TrendingUp, TrendingDown, Minus, Loader2, Zap, X, Plus } from "lucide-react";
+
+const DEFAULT_WATCHLIST = ["SPY", "QQQ", "NVDA", "PLTR", "TSLA", "AAPL", "MSFT", "AMD", "META", "AMZN", "RXRX", "ARWR"];
+const WL_KEY = "mia.watchlist.v1";
+
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -53,8 +58,31 @@ function Arena() {
   const [freshness, setFreshness] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
+  const [watchlist, setWatchlist] = useState<string[]>(() => {
+    if (typeof window === "undefined") return DEFAULT_WATCHLIST;
+    try {
+      const raw = localStorage.getItem(WL_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_WATCHLIST;
+    } catch { return DEFAULT_WATCHLIST; }
+  });
+  const [tickerInput, setTickerInput] = useState("");
+
+  useEffect(() => {
+    try { localStorage.setItem(WL_KEY, JSON.stringify(watchlist)); } catch {}
+  }, [watchlist]);
+
+  const addTicker = () => {
+    const t = tickerInput.trim().toUpperCase();
+    if (!t || watchlist.includes(t)) { setTickerInput(""); return; }
+    setWatchlist((w) => [...w, t]);
+    setTickerInput("");
+  };
+  const removeTicker = (t: string) => setWatchlist((w) => w.filter((x) => x !== t));
 
   const abortRef = useRef<AbortController | null>(null);
+  const watchlistRef = useRef(watchlist);
+  useEffect(() => { watchlistRef.current = watchlist; }, [watchlist]);
 
   const run = useCallback(async () => {
     if (running) return;
@@ -69,8 +97,13 @@ function Arena() {
     abortRef.current = ctrl;
 
     try {
-      const res = await fetch("/api/pipeline", { signal: ctrl.signal });
+      const wl = encodeURIComponent(watchlistRef.current.join(","));
+      const res = await fetch(`/api/pipeline?watchlist=${wl}&t=${Date.now()}`, {
+        signal: ctrl.signal,
+        cache: "no-store",
+      });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -168,7 +201,43 @@ function Arena() {
               Sources fetched {new Date(fetchedAt).toLocaleTimeString()}
             </p>
           )}
+
+          <Card className="mt-4 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs uppercase tracking-wider font-mono text-muted-foreground">Watchlist ({watchlist.length})</h3>
+              {sources?.hotTickers?.length > 0 && (
+                <span className="text-[10px] font-mono text-primary">hot: {sources.hotTickers.join(", ")}</span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1 mb-2">
+              {watchlist.map((t) => (
+                <Badge key={t} variant="secondary" className="font-mono gap-1">
+                  {t}
+                  <button onClick={() => removeTicker(t)} className="hover:text-destructive" aria-label={`remove ${t}`}>
+                    <X className="size-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+            <div className="flex gap-1">
+              <Input
+                value={tickerInput}
+                onChange={(e) => setTickerInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTicker(); } }}
+                placeholder="Add ticker (e.g. NFLX)"
+                className="h-8 text-xs font-mono uppercase"
+                maxLength={6}
+              />
+              <Button onClick={addTicker} size="sm" variant="outline" className="h-8">
+                <Plus className="size-3" />
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-2">
+              News context auto-derives from the unusual movers in your watchlist each run.
+            </p>
+          </Card>
         </section>
+
 
         <section className="col-span-12 lg:col-span-8 space-y-4">
           {error && (

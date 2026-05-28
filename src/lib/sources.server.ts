@@ -10,12 +10,10 @@ async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Prom
   return value;
 }
 
-
 const FINNHUB = "https://finnhub.io/api/v1";
 const GDELT = "https://api.gdeltproject.org/api/v2/doc/doc";
 const CONGRESS = "https://api.congress.gov/v3";
 const NEWSAPI = "https://newsapi.org/v2";
-const SEC = "https://data.sec.gov";
 
 async function safeJson(url: string, init?: RequestInit) {
   try {
@@ -39,14 +37,14 @@ export interface OptionsFlowItem {
   note?: string;
 }
 
-const WATCHLIST = ["SPY", "QQQ", "NVDA", "PLTR", "TSLA", "AAPL", "MSFT", "AMD", "META", "AMZN", "RXRX", "ARWR"];
+export const DEFAULT_WATCHLIST = ["SPY", "QQQ", "NVDA", "PLTR", "TSLA", "AAPL", "MSFT", "AMD", "META", "AMZN", "RXRX", "ARWR"];
 
-export async function fetchOptionsFlow(): Promise<OptionsFlowItem[]> {
+export async function fetchOptionsFlow(symbols: string[]): Promise<OptionsFlowItem[]> {
   const key = process.env.FINNHUB_API_KEY;
-  if (!key) return [];
+  if (!key || symbols.length === 0) return [];
   const results: OptionsFlowItem[] = [];
   await Promise.all(
-    WATCHLIST.map(async (sym) => {
+    symbols.map(async (sym) => {
       const q = await safeJson(`${FINNHUB}/quote?symbol=${sym}&token=${key}`);
       if (q && typeof q.c === "number" && q.c > 0) {
         const changePct = q.pc ? ((q.c - q.pc) / q.pc) * 100 : 0;
@@ -71,10 +69,24 @@ export interface NewsItem {
   description?: string;
 }
 
-export async function fetchNews(): Promise<NewsItem[]> {
+/**
+ * Fetch news. If `tickers` is provided, the query is built around those symbols
+ * so the news context tracks what the options agent actually flagged.
+ */
+export async function fetchNews(tickers: string[] = []): Promise<NewsItem[]> {
   const key = process.env.NEWS_API_KEY;
   if (!key) return [];
-  const q = encodeURIComponent("(stocks OR options OR SEC OR FDA OR Congress OR tariff OR earnings) AND (market OR policy OR legislation)");
+
+  let query: string;
+  if (tickers.length > 0) {
+    // Quote each ticker so NewsAPI treats it as a phrase, then OR them together.
+    const tickerClause = tickers.slice(0, 8).map((t) => `"${t}"`).join(" OR ");
+    query = `(${tickerClause}) AND (stock OR shares OR earnings OR SEC OR FDA OR upgrade OR downgrade OR guidance OR contract)`;
+  } else {
+    query = "(stocks OR options OR SEC OR FDA OR Congress OR tariff OR earnings) AND (market OR policy OR legislation)";
+  }
+
+  const q = encodeURIComponent(query);
   const r = await safeJson(`${NEWSAPI}/everything?q=${q}&sortBy=publishedAt&language=en&pageSize=25&apiKey=${key}`);
   if (!r?.articles) return [];
   return r.articles.slice(0, 20).map((a: any) => ({
@@ -131,13 +143,28 @@ export async function fetchPolitical(): Promise<PoliticalEvent[]> {
   }));
 }
 
-export async function fetchAllSources() {
-  const [options, news, bills, political] = await Promise.all([
-    cached("options", 15_000, fetchOptionsFlow),
-    cached("news", 120_000, fetchNews),
+/**
+ * Two-phase fetch:
+ *   1. Pull options for the user's watchlist (cache keyed by watchlist).
+ *   2. Derive the "hot" tickers from the options data and use them to drive the
+ *      news query, so news context tracks the live market signal rather than a
+ *      static keyword list.
+ */
+export async function fetchAllSources(watchlist: string[]) {
+  const wlKey = watchlist.slice().sort().join(",");
+
+  const options = await cached(`options:${wlKey}`, 15_000, () => fetchOptionsFlow(watchlist));
+
+  // Pick the contextual tickers: prefer "unusual" movers, fallback to top movers.
+  const unusual = options.filter((o) => o.unusual).map((o) => o.symbol);
+  const hotTickers = (unusual.length > 0 ? unusual : options.slice(0, 5).map((o) => o.symbol)).slice(0, 8);
+  const newsKey = `news:${hotTickers.slice().sort().join(",")}`;
+
+  const [news, bills, political] = await Promise.all([
+    cached(newsKey, 120_000, () => fetchNews(hotTickers)),
     cached("bills", 3_600_000, fetchLegislation),
     cached("political", 300_000, fetchPolitical),
   ]);
-  return { options, news, bills, political, fetchedAt: new Date().toISOString() };
-}
 
+  return { options, news, bills, political, hotTickers, fetchedAt: new Date().toISOString() };
+}

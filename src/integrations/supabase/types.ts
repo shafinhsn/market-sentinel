@@ -14,7 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      pipeline_runs: {
+        Row: {
+          created_at: string
+          fetched_at: string | null
+          freshness: string | null
+          hot_tickers: string[]
+          id: string
+          recommendations: Json
+          sources: Json | null
+          turns: Json
+          watchlist: string[]
+        }
+        Insert: {
+          created_at?: string
+          fetched_at?: string | null
+          freshness?: string | null
+          hot_tickers?: string[]
+          id?: string
+          recommendations?: Json
+          sources?: Json | null
+          turns?: Json
+          watchlist?: string[]
+        }
+        Update: {
+          created_at?: string
+          fetched_at?: string | null
+          freshness?: string | null
+          hot_tickers?: string[]
+          id?: string
+          recommendations?: Json
+          sources?: Json | null
+          turns?: Json
+          watchlist?: string[]
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
