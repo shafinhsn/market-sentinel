@@ -93,24 +93,17 @@ function Arena() {
     setRecs([]);
     setFreshness("");
 
-
-  const abortRef = useRef<AbortController | null>(null);
-
-  const run = useCallback(async () => {
-    if (running) return;
-    setRunning(true);
-    setError(null);
-    setStatuses(Array(9).fill("idle"));
-    setTurns([]);
-    setRecs([]);
-    setFreshness("");
-
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
     try {
-      const res = await fetch("/api/pipeline", { signal: ctrl.signal });
+      const wl = encodeURIComponent(watchlistRef.current.join(","));
+      const res = await fetch(`/api/pipeline?watchlist=${wl}&t=${Date.now()}`, {
+        signal: ctrl.signal,
+        cache: "no-store",
+      });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
