@@ -56,9 +56,12 @@ export const Route = createFileRoute("/api/pipeline")({
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
           async start(controller) {
+            const allTurns: Array<{ agent: string; role: string; output: string; idx: number }> = [];
             const send = (event: string, data: unknown) => {
+              if (event === "turn") allTurns.push(data as any);
               controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
             };
+
 
             try {
               send("stage", { step: "sources", status: "active" });
