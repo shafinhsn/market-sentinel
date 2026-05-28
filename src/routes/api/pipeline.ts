@@ -72,7 +72,8 @@ export const Route = createFileRoute("/api/pipeline")({
                   user: `Live quotes & flow data:\n${JSON.stringify(sources.options, null, 2)}\n\nWhich tickers show unusual activity and why?` },
                 { agent: "Morgan Lee", role: "News Intelligence", idx: 1,
                   sys: "You are Morgan Lee, market news analyst. Be concise. Filter for catalysts that affect equity markets.",
-                  user: `Recent headlines:\n${JSON.stringify(sources.news.slice(0, 15), null, 2)}\n\nWhich news items are real catalysts? Tag tickers/sectors.` },
+                  user: `Hot tickers from today's options flow (news was queried around these): ${sources.hotTickers.join(", ") || "none"}\n\nHeadlines:\n${JSON.stringify(sources.news.slice(0, 15), null, 2)}\n\nWhich news items are real catalysts for the hot tickers? Tag tickers/sectors.` },
+
                 { agent: "Jordan Rivera", role: "Legislation", idx: 2,
                   sys: "You are Jordan Rivera, legislative analyst. Be concise. Map bills to market sectors.",
                   user: `Active congressional bills:\n${JSON.stringify(sources.bills, null, 2)}\n\nWhich bills could move sectors? Estimate passage probability and timeline.` },
