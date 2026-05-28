@@ -201,7 +201,43 @@ function Arena() {
               Sources fetched {new Date(fetchedAt).toLocaleTimeString()}
             </p>
           )}
+
+          <Card className="mt-4 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs uppercase tracking-wider font-mono text-muted-foreground">Watchlist ({watchlist.length})</h3>
+              {sources?.hotTickers?.length > 0 && (
+                <span className="text-[10px] font-mono text-primary">hot: {sources.hotTickers.join(", ")}</span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1 mb-2">
+              {watchlist.map((t) => (
+                <Badge key={t} variant="secondary" className="font-mono gap-1">
+                  {t}
+                  <button onClick={() => removeTicker(t)} className="hover:text-destructive" aria-label={`remove ${t}`}>
+                    <X className="size-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+            <div className="flex gap-1">
+              <Input
+                value={tickerInput}
+                onChange={(e) => setTickerInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTicker(); } }}
+                placeholder="Add ticker (e.g. NFLX)"
+                className="h-8 text-xs font-mono uppercase"
+                maxLength={6}
+              />
+              <Button onClick={addTicker} size="sm" variant="outline" className="h-8">
+                <Plus className="size-3" />
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-2">
+              News context auto-derives from the unusual movers in your watchlist each run.
+            </p>
+          </Card>
         </section>
+
 
         <section className="col-span-12 lg:col-span-8 space-y-4">
           {error && (
